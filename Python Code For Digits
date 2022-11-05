@@ -1,0 +1,201 @@
+import numpy as np
+from keras.datasets import mnist     # MNIST dataset is included in Keras
+import matplotlib.pyplot as plt      # MATLAB like plotting routines
+import random                        # for generating random numbers
+import scipy.special as sp
+
+NUM_EPOCHS = 500
+STEP_SIZE = 0.01
+
+
+# generate image data
+def generateImageData(x, y):
+
+  # data matrix should be of dimension (number of examples) x (28*28 + 2)
+  # because we add one column at the beginning for the bias and another
+  # at the end for the correct class
+  DATA = np.zeros([x.shape[0], 28*28+2])
+
+  # biases
+  DATA[:,0] = np.ones([x.shape[0],])
+
+  # image data
+  DATA[:,1:28*28+1] = np.reshape(x, [x.shape[0], 28*28]) / 255
+
+  # true classes
+  DATA[:,-1] = y
+
+  return DATA
+
+
+# this function computes the cross entropy between two probability distributions
+# p and q. The special function sp.xlogy(p, q) computes p*log(q) with the convention
+# that p*log(q) is 0 whenever p=0. A small tolerance is added to q in order to
+# guard against the case when q is very close to 0 (in which case log(q) is close
+# to negative infinity, which causes overflow issues).
+def crossEntropy(p,q):
+  tol = 1.e-10
+  return -np.sum(sp.xlogy(p, q + tol))
+
+
+# this function should return the cross entropy loss given the weights w, data 
+# points x (which includes the biases), the concatenated one hot vectors y, and the
+# concatenated softmax outputs o
+def crossEntropyLoss(x, y, o):
+
+  loss = 0.0
+
+  # for each data point, do...
+  for i in range(x.shape[0]):
+
+    loss += crossEntropy(y[:,i],o.T[:,i])
+
+  return loss
+
+
+
+# this function computes the softmax of a vector z in a numerically stable 
+# way that doesn't cause overflow (if you try to compute the softmax function 
+# directly, you will find that the computation of both the numerator and
+# denominator results in a huge number that can't be processed by Python
+# even though the fraction itself is a small number)
+def Softmax(z):
+  e_z = np.exp(z - np.reshape(np.max(z, axis=1), [z.shape[0],1]))
+  return e_z / np.reshape(e_z.sum(axis=1), [z.shape[0],1])
+
+
+# this function takes the vector labels which consists of the correct label for
+# each training example and returns y, the concatenation of one hot vectors 
+# for each example. 
+def OneHot(labels):
+
+  y = np.zeros([10,len(labels)])
+
+  for i in range(len(labels)):
+    y[int(labels[i]),i] = 1
+
+  return y
+
+
+# this function computes the gradient of the Cross Entropy loss, i.e. 
+# grad = (O-Y)*X
+def computeGrad(w, x, y, o):
+
+  # initialize the array for the gradients
+  grad = np.zeros(w.shape)
+
+  # compute the gradient of the cross entropy loss
+  
+  grad = np.dot((o.T - y),x).T
+
+  return grad
+
+
+# this function evaluates the accuracy of the classifier on the data set specified
+# by DATA.
+def evalAccuracy(DATA, w):
+
+  numCorrect = 0
+
+  # for each data point in DATA, do...
+  for i in range(DATA.shape[0]):
+    # count the number of correct examples here
+    o = Softmax(np.matmul(DATA[i,0:785].reshape(1,785), w))
+    predicted_class = np.argmax(o)
+    true_class = DATA[i,785]
+    
+    if predicted_class == true_class:
+      numCorrect += 1
+
+  # compute the accuracy
+  accuracy = numCorrect / DATA.shape[0]
+
+  return accuracy
+
+
+# this function performs gradient descent on the multilayer perceptron/neural
+# network to update the weights w
+def trainNetwork(DATA_train, DATA_test, w):
+
+  # separate data points for training (x_train) and one-hot labels (y_train)
+  x_train = np.reshape(DATA_train[:,0:28*28+1], [DATA_train.shape[0],28*28+1])
+  y_train = OneHot(DATA_train[:,-1])
+
+  # separate data points from testing/validation (x_test) and one-hot labels 
+  # (y_test)
+  x_test = np.reshape(DATA_test[:,0:28*28+1], [DATA_test.shape[0],28*28+1])
+  y_test = OneHot(DATA_test[:,-1])
+  
+  # for each training epoch/gradient descent step, do...
+  for i in range(NUM_EPOCHS):
+    
+    # compute the concatenated softmax matrices for both the training and test
+    # data
+
+    o_train = Softmax(np.matmul(x_train,w))
+    o_test = Softmax(np.matmul(x_test,w))
+
+    # the gradient descent update step:
+    grad = computeGrad(w, x_test, y_test, o_test)
+    w = w - STEP_SIZE * grad
+
+    # compute the accuracy of the classifier as well as the value of the
+    # cross entropy loss for the current set of weights
+    accuracy = evalAccuracy(DATA_test, w)
+    loss = crossEntropyLoss(x_test, y_test, o_test)
+
+    # print intermediate results
+    print("Epoch ", i, ", Cross Entropy Loss: ", loss, ", Accuracy: ", accuracy)
+
+  return w
+
+
+def main():
+
+  # load image data from MNIST/keras
+  (X_train, y_train), (X_test, y_test) = mnist.load_data()
+
+  # generate training and test data
+  DATA_train = generateImageData(X_train, y_train)
+  DATA_test = generateImageData(X_test, y_test)
+
+  # initial guess for weights
+  w = np.sqrt(1.0/10) * np.random.normal(size=[28*28+1, 10])
+
+  # run the perceptron algorithm
+  w = trainNetwork(DATA_train, DATA_test, w)
+
+
+  # plot a random subsample of the test data along with the labels supplied 
+  # by the classifier
+  plt.rcParams['figure.figsize'] = (9,9) 
+
+  for i in range(9):
+    plt.subplot(3,3,i+1)
+    num = random.randint(0, len(X_test))
+    plt.imshow(X_test[num], cmap='gray', interpolation='none')
+
+    x_i = np.reshape(np.concatenate(([[1.0]], np.reshape(X_test[num], [1,28*28])), axis=1), [1,28*28+1])
+    o_i = Softmax(np.matmul(x_i, w))
+    predicted_class = np.argmax(o_i)
+    plt.title("Class {}".format(predicted_class))
+      
+  plt.tight_layout()
+
+'''
+  # plot the loss function and accuracy for each epoch
+  plt.figure()
+  plt.subplot(1,2,1)
+  plt.plot(accuracy)
+  plt.xlabel("Training epoch")
+  plt.ylabel("Accuracy")
+
+  plt.subplot(1,2,2)
+  plt.plot(loss)
+  plt.xlabel("Training epoch")
+  plt.ylabel("Cross entropy loss")
+  plt.show()
+'''
+  
+if __name__ == "__main__":
+  main()
